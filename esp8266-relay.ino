@@ -4,17 +4,24 @@
 #include <ESP8266WebServer.h>
 #include <WebSocketsServer.h>
 #include <WiFiManager.h>
+#include <PubSubClient.h>
 #include <EEPROM.h>
 
 byte output = 2;
 byte button = 0;
 boolean flag = 0;
+long lastReconnectAttempt = 0;
 String mStatus, mServer, mPort, mUser, mPassword;
-byte ae = 2;
+const char* mqttServer;
+int mqttPort;
+const char* mqttUser;
+const char* mqttPassword;
 
 ESP8266WebServer server(80);
 WebSocketsServer webSocket = WebSocketsServer(81);
 WiFiManager wifiManager;
+WiFiClient espClient;
+PubSubClient client(espClient);
 
 void setup() {
   pinMode(output, OUTPUT);
@@ -44,7 +51,23 @@ void setup() {
   eepromRead();
 
   if (mStatus == "1") {
-    Serial.println("MQTT status: true"); 
+    Serial.println("MQTT status: true");
+    mqttServer = mServer.c_str();
+    mqttPort = mPort.toInt();
+    mqttUser = mUser.c_str();
+    mqttPassword = mPassword.c_str();
+    client.setServer(mqttServer, mqttPort);
+    client.setCallback(callback);
+    Serial.println("Connecting to MQTT...");
+ 
+    if (client.connect("ESP8266Client", mqttUser, mqttPassword )) {
+      Serial.println("connected");  
+    } else {
+      Serial.print("failed with state ");
+      Serial.print(client.state());
+    }
+    client.publish("esp/test", "Hello from ESP8266");
+    client.subscribe("esp/test");
   }
   if (mStatus == "0") {
     Serial.println("MQTT status: false"); 
@@ -55,6 +78,22 @@ void loop() {
   checkButton();
   server.handleClient();
   webSocket.loop();
+  if (mStatus == "1" && !client.connected()) {
+    long now = millis();
+    if (now - lastReconnectAttempt > 5000) {
+      lastReconnectAttempt = now;
+      Serial.println("MQTT status: Connection error");
+      // Attempt to reconnect
+      if (reconnect()) {
+        lastReconnectAttempt = 0;
+        Serial.println("mqtt connected");
+      }
+    }
+  } else {
+    // Client connected
+
+    client.loop();
+  }
 }
 
 void indexPage() {
@@ -134,8 +173,6 @@ void webSocketEvent(byte num, WStype_t type, uint8_t * payload, size_t length) {
       Serial.println(": CONNECTED");
       break;
     case WStype_TEXT:
-      Serial.print("[WS] Type ");
-
       if (payload[0] == 't') {
         digitalWrite(output, !digitalRead(output));
         broadcastState();
@@ -151,6 +188,7 @@ void broadcastState() {
   }
   if (digitalRead(output) == LOW) {
     Serial.println("State: LOW");
+    webSocket.broadcastTXT("1");
   }
 }
 
@@ -210,4 +248,28 @@ void wifiReset() {
     wifiManager.resetSettings();
     Serial.println("Reset saved settings!");
   }
+}
+
+boolean reconnect() {
+  if (client.connect("ESP8266Client", mqttUser, mqttPassword )) {
+    // Once connected, publish an announcement...
+    client.publish("esp/test", "Hello from ESP8266");
+    // ... and resubscribe
+    client.subscribe("esp/test");
+  }
+  return client.connected();
+}
+
+void callback(char* topic, byte* payload, unsigned int length) {
+ 
+  Serial.print("Message arrived in topic: ");
+  Serial.println(topic);
+ 
+  Serial.print("Message:");
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+ 
+  Serial.println();
+  Serial.println("-----------------------");
 }
