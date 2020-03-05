@@ -49,29 +49,7 @@ void setup() {
   webSocket.onEvent(webSocketEvent);
 
   eepromRead();
-
-  if (mStatus == "1") {
-    Serial.println("MQTT status: true");
-    mqttServer = mServer.c_str();
-    mqttPort = mPort.toInt();
-    mqttUser = mUser.c_str();
-    mqttPassword = mPassword.c_str();
-    client.setServer(mqttServer, mqttPort);
-    client.setCallback(callback);
-    Serial.println("Connecting to MQTT...");
- 
-    if (client.connect("ESP8266Client", mqttUser, mqttPassword )) {
-      Serial.println("connected");  
-    } else {
-      Serial.print("failed with state ");
-      Serial.print(client.state());
-    }
-    client.publish("esp/test", "Hello from ESP8266");
-    client.subscribe("esp/test");
-  }
-  if (mStatus == "0") {
-    Serial.println("MQTT status: false"); 
-  }
+  mqttConnect();
 }
 
 void loop() {
@@ -96,6 +74,10 @@ void loop() {
   }
 }
 
+////////////////////////////////////////////////////////
+//              WEB FUNCTIONS
+////////////////////////////////////////////////////////
+
 void indexPage() {
   String view = INDEX_PAGE;
   server.send(200, "text/html", view);
@@ -116,20 +98,80 @@ void loadConfig() {
   json += mPort;
   json += "\",\"mqtt_user\":\"";
   json += mUser;
-  json += "\",\"mqtt_password\":\"";
-  json += mPassword;
   json += "\"}";
   server.send(200, "text/json", json);
 }
 
-void saveStatus() {
-  server.send(200, "text/html");
-  
-  // Status
-  EEPROM.write(0, server.arg("mqtt_status")[0]);
-  EEPROM.commit();
-  Serial.println("Status successfully saved");
+////////////////////////////////////////////////////////
+//              BUTTONS FUNCTIONS
+////////////////////////////////////////////////////////
+
+void wifiReset() {
+  Serial.println("Waiting for reset wifi!");
+  for (int i = 0; i < 4; i++) {
+    Serial.print(".");
+    delay(1000);
+  }
+  Serial.println();
+  if(digitalRead(0) == LOW) {
+    wifiManager.resetSettings();
+    Serial.println("Reset saved settings!");
+  }
 }
+
+void checkButton() {
+  if (digitalRead(button) == LOW && flag == 0) {
+    flag = 1;
+    digitalWrite(output, !digitalRead(output));
+    broadcastState();
+  }
+  if (digitalRead(button) == HIGH && flag == 1) {
+    flag = 0;
+  }
+}
+
+////////////////////////////////////////////////////////
+//              WEBSOCKETS FUNCTIONS
+////////////////////////////////////////////////////////
+
+void webSocketEvent(byte num, WStype_t type, uint8_t * payload, size_t length) {
+  switch(type) {
+    case WStype_DISCONNECTED:
+      Serial.print("[WS] Type ");
+      Serial.print(type);
+      Serial.println(": DISCONNECTED");
+      break;
+    case WStype_CONNECTED:
+      broadcastState();
+      Serial.print("[WS] Type ");
+      Serial.print(type);
+      Serial.println(": CONNECTED");
+      break;
+    case WStype_TEXT:
+      if (payload[0] == 't') {
+        digitalWrite(output, !digitalRead(output));
+        broadcastState();
+      }
+      break;
+  }
+}
+
+void broadcastState() {
+  if (digitalRead(output) == HIGH) {
+    webSocket.broadcastTXT("0");
+    client.publish("esp/state", "1");
+    Serial.println("State: HIGH");
+  }
+  if (digitalRead(output) == LOW) {
+    webSocket.broadcastTXT("1");
+    client.publish("esp/state", "0");
+    Serial.println("State: LOW");
+  }
+}
+
+////////////////////////////////////////////////////////
+//              EEPROM FUNCTIONS
+////////////////////////////////////////////////////////
 
 void saveConfig() {
   server.send(200, "text/html");
@@ -159,48 +201,13 @@ void saveConfig() {
   Serial.println("Сonfiguration successfully saved");
 }
 
-void webSocketEvent(byte num, WStype_t type, uint8_t * payload, size_t length) {
-  switch(type) {
-    case WStype_DISCONNECTED:
-      Serial.print("[WS] Type ");
-      Serial.print(type);
-      Serial.println(": DISCONNECTED");
-      break;
-    case WStype_CONNECTED:
-      broadcastState();
-      Serial.print("[WS] Type ");
-      Serial.print(type);
-      Serial.println(": CONNECTED");
-      break;
-    case WStype_TEXT:
-      if (payload[0] == 't') {
-        digitalWrite(output, !digitalRead(output));
-        broadcastState();
-      }
-      break;
-  }
-}
-
-void broadcastState() {
-  if (digitalRead(output) == HIGH) {
-    webSocket.broadcastTXT("0");
-    Serial.println("State: HIGH");
-  }
-  if (digitalRead(output) == LOW) {
-    Serial.println("State: LOW");
-    webSocket.broadcastTXT("1");
-  }
-}
-
-void checkButton() {
-  if (digitalRead(button) == LOW && flag == 0) {
-    flag = 1;
-    digitalWrite(output, !digitalRead(output));
-    broadcastState();
-  }
-  if (digitalRead(button) == HIGH && flag == 1) {
-    flag = 0;
-  }
+void saveStatus() {
+  server.send(200, "text/html");
+  
+  // Status
+  EEPROM.write(0, server.arg("mqtt_status")[0]);
+  EEPROM.commit();
+  Serial.println("Status successfully saved");
 }
 
 void eepromRead() {
@@ -237,16 +244,32 @@ void eepromRead() {
   Serial.println("EEPROM read");
 }
 
-void wifiReset() {
-  Serial.println("Waiting for reset wifi!");
-  for (int i = 0; i < 4; i++) {
-    Serial.print(".");
-    delay(1000);
+////////////////////////////////////////////////////////
+//              MQTT FUNCTIONS
+////////////////////////////////////////////////////////
+
+void mqttConnect() {
+  if (mStatus == "1") {
+    Serial.println("MQTT status: true");
+    mqttServer = mServer.c_str();
+    mqttPort = mPort.toInt();
+    mqttUser = mUser.c_str();
+    mqttPassword = mPassword.c_str();
+    client.setServer(mqttServer, mqttPort);
+    client.setCallback(callback);
+    Serial.println("Connecting to MQTT...");
+ 
+    if (client.connect("ESP8266Client", mqttUser, mqttPassword )) {
+      Serial.println("connected");  
+    } else {
+      Serial.print("failed with state ");
+      Serial.print(client.state());
+    }
+    client.publish("esp/test", "Hello from ESP8266");
+    client.subscribe("esp/test");
   }
-  Serial.println();
-  if(digitalRead(0) == LOW) {
-    wifiManager.resetSettings();
-    Serial.println("Reset saved settings!");
+  if (mStatus == "0") {
+    Serial.println("MQTT status: false"); 
   }
 }
 
@@ -261,15 +284,21 @@ boolean reconnect() {
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
- 
+
   Serial.print("Message arrived in topic: ");
   Serial.println(topic);
  
   Serial.print("Message:");
   for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
+    Serial.println((char)payload[i]);
   }
- 
+  if (payload[0] == '0') {
+    digitalWrite(output, LOW);
+  }
+  if (payload[0] == '1') {
+    digitalWrite(output, HIGH);
+  }
+  broadcastState();
   Serial.println();
   Serial.println("-----------------------");
 }
