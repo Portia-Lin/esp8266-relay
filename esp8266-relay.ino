@@ -1,5 +1,6 @@
 #include "index.h"
-#include "config.h"
+#include "config_device.h"
+#include "config_mqtt.h"
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <WebSocketsServer.h>
@@ -38,7 +39,8 @@ void setup() {
   wifiManager.autoConnect("ESP8266");
   
   server.on("/", indexPage);
-  server.on("/config", configPage);
+  server.on("/configMqtt", configMqtt);
+  server.on("/configDevice", configDevice);
   server.on("/loadConfig", loadConfig);
   server.on("/saveStatus", saveStatus);
   server.on("/saveConfig", saveConfig);
@@ -83,8 +85,12 @@ void indexPage() {
   server.send(200, "text/html", view);
 }
 
-void configPage() {
-  String view = CONFIG_PAGE;
+void configMqtt() {
+  String view = CONFIG_MQTT;
+  server.send(200, "text/html", view);
+}
+void configDevice() {
+  String view = CONFIG_DEVICE;
   server.send(200, "text/html", view);
 }
 
@@ -263,7 +269,7 @@ void mqttConnect() {
       Serial.println("connected");  
     } else {
       Serial.print("failed with state ");
-      Serial.print(client.state());
+      Serial.println(client.state());
     }
     client.publish("esp/test", "Hello from ESP8266");
     client.subscribe("esp/test");
