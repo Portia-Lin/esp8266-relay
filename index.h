@@ -58,7 +58,7 @@ const char INDEX_PAGE[] PROGMEM = R"=====(
 
 <body>
   <div class="container">
-    <h1 class="center">TEST PAGE</h1>
+    <h1 class="center" id="d_name">TEST PAGE</h1>
     <h1 class="center" id="state">---</h1> <br> <br>
     <button type="button" id="switch">
       <svg width="9rem" height="9rem">
@@ -109,8 +109,20 @@ function sendText(data) {
     Socket.send(data);
 }
 
+function loadIndex() {
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", '/loadIndex');
+    xhr.send(null);
+    xhr.onload = function() {
+      if (xhr.status == 200) {
+        var json = JSON.parse(xhr.response);
+        document.getElementById('d_name').innerHTML = json.d_name;
+      }
+    };
+  }
 
 window.onload = function(e) {
+  loadIndex();
     init();
 }
 </script>

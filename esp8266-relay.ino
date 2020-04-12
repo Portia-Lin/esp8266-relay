@@ -8,11 +8,11 @@
 #include <PubSubClient.h>
 #include <EEPROM.h>
 
-byte output = 2;
+byte output = 12;
 byte button = 0;
 boolean flag = 0;
 long lastReconnectAttempt = 0;
-String mStatus, mServer, mPort, mUser, mPassword;
+String mStatus, mServer, mPort, mUser, mPassword, dName, dHostname, dMac;
 const char* mqttServer;
 int mqttPort;
 const char* mqttUser;
@@ -21,8 +21,8 @@ const char* mqttPassword;
 ESP8266WebServer server(80);
 WebSocketsServer webSocket = WebSocketsServer(81);
 WiFiManager wifiManager;
-WiFiClient espClient;
-PubSubClient client(espClient);
+WiFiClient ethClient;
+PubSubClient client(ethClient);
 
 void setup() {
   pinMode(output, OUTPUT);
@@ -31,9 +31,11 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
   Serial.println("* * * * *");
-  EEPROM.begin(91);
+  EEPROM.begin(141);
   Serial.println("EEPROM begin");
-  WiFi.hostname("ESP8266");
+  eepromRead();
+  getMac();
+  WiFi.hostname(dHostname);
   wifiReset();
   wifiManager.setTimeout(180);
   wifiManager.autoConnect("ESP8266");
@@ -41,16 +43,18 @@ void setup() {
   server.on("/", indexPage);
   server.on("/configMqtt", configMqtt);
   server.on("/configDevice", configDevice);
+  server.on("/loadIndex", loadIndex);
   server.on("/loadConfig", loadConfig);
   server.on("/saveStatus", saveStatus);
   server.on("/saveConfig", saveConfig);
+  server.on("/loadDevice", loadDevice);
+  server.on("/saveDevice", saveDevice);
   server.begin();
   
   webSocket.begin();
   Serial.println("[WS] Server started");
   webSocket.onEvent(webSocketEvent);
 
-  eepromRead();
   mqttConnect();
 }
 
@@ -89,9 +93,18 @@ void configMqtt() {
   String view = CONFIG_MQTT;
   server.send(200, "text/html", view);
 }
+
 void configDevice() {
   String view = CONFIG_DEVICE;
   server.send(200, "text/html", view);
+}
+
+void loadIndex() {
+  String json = "{";
+  json += "\"d_name\":\"";
+  json += dName;
+  json += "\"}";
+  server.send(200, "text/json", json);
 }
 
 void loadConfig() {
@@ -104,6 +117,28 @@ void loadConfig() {
   json += mPort;
   json += "\",\"mqtt_user\":\"";
   json += mUser;
+  json += "\"}";
+  server.send(200, "text/json", json);
+}
+
+void loadDevice() {
+  String dIp;
+  for (int i = 0; i < 4; i++) {
+    dIp += WiFi.localIP()[i];
+    dIp += ".";
+  }
+  dIp = dIp.substring(0, dIp.length()-1);
+  String json = "{";
+  json += "\"d_name\":\"";
+  json += dName;
+  json += "\",\"d_hostname\":\"";
+  json += dHostname;
+  json += "\",\"uptime\":\"";
+  json += millis();
+  json += "\",\"d_ip\":\"";
+  json += dIp;
+  json += "\",\"d_mac\":\"";
+  json += dMac;
   json += "\"}";
   server.send(200, "text/json", json);
 }
@@ -164,12 +199,12 @@ void webSocketEvent(byte num, WStype_t type, uint8_t * payload, size_t length) {
 
 void broadcastState() {
   if (digitalRead(output) == HIGH) {
-    webSocket.broadcastTXT("0");
+    webSocket.broadcastTXT("1");
     client.publish("esp/state", "1");
     Serial.println("State: HIGH");
   }
   if (digitalRead(output) == LOW) {
-    webSocket.broadcastTXT("1");
+    webSocket.broadcastTXT("0");
     client.publish("esp/state", "0");
     Serial.println("State: LOW");
   }
@@ -204,7 +239,7 @@ void saveConfig() {
   }
 
   EEPROM.commit();
-  Serial.println("Сonfiguration successfully saved");
+  Serial.println("Сonfigurations MQTT successfully saved");
 }
 
 void saveStatus() {
@@ -212,8 +247,27 @@ void saveStatus() {
   
   // Status
   EEPROM.write(0, server.arg("mqtt_status")[0]);
+  
   EEPROM.commit();
   Serial.println("Status successfully saved");
+}
+
+void saveDevice() {
+  server.send(200, "text/html");
+  for (int i = 91; i <=140 ; ++i) { EEPROM.write(i, 0); }
+
+  // Name
+  for (int i = 0; i < server.arg("d_name").length(); i++) {
+    EEPROM.write(91+i, server.arg("d_name")[i]);
+  }
+
+  // Hostname
+  for (int i = 0; i < server.arg("d_hostname").length(); i++) {
+    EEPROM.write(116+i, server.arg("d_hostname")[i]);
+  }
+
+  EEPROM.commit();
+  Serial.println("Сonfiguration successfully saved");
 }
 
 void eepromRead() {
@@ -247,6 +301,20 @@ void eepromRead() {
       mPassword += char(EEPROM.read(i));
     }
   }
+
+  // Name
+  for (int i = 91; i <= 115; i++) {
+    if (char(EEPROM.read(i)) != 0x00) {
+      dName += char(EEPROM.read(i));
+    }
+  }
+
+  // Hostname
+  for (int i = 116; i <= 140; i++) {
+    if (char(EEPROM.read(i)) != 0x00) {
+      dHostname += char(EEPROM.read(i));
+    }
+  }
   Serial.println("EEPROM read");
 }
 
@@ -265,14 +333,14 @@ void mqttConnect() {
     client.setCallback(callback);
     Serial.println("Connecting to MQTT...");
  
-    if (client.connect("ESP8266Client", mqttUser, mqttPassword )) {
+    if (client.connect("ESP8266ClientAA", mqttUser, mqttPassword )) {
       Serial.println("connected");  
     } else {
       Serial.print("failed with state ");
       Serial.println(client.state());
     }
-    client.publish("esp/test", "Hello from ESP8266");
-    client.subscribe("esp/test");
+    client.publish("esp/state", "Hello from ESP8266");
+    client.subscribe("esp/relay");
   }
   if (mStatus == "0") {
     Serial.println("MQTT status: false"); 
@@ -280,11 +348,11 @@ void mqttConnect() {
 }
 
 boolean reconnect() {
-  if (client.connect("ESP8266Client", mqttUser, mqttPassword )) {
+  if (client.connect("ESP8266ClientAA", mqttUser, mqttPassword )) {
     // Once connected, publish an announcement...
-    client.publish("esp/test", "Hello from ESP8266");
+    client.publish("esp/state", "Hello from ESP8266");
     // ... and resubscribe
-    client.subscribe("esp/test");
+    client.subscribe("esp/relay");
   }
   return client.connected();
 }
@@ -294,7 +362,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived in topic: ");
   Serial.println(topic);
  
-  Serial.print("Message:");
+  Serial.print("Message: ");
   for (int i = 0; i < length; i++) {
     Serial.println((char)payload[i]);
   }
@@ -307,4 +375,10 @@ void callback(char* topic, byte* payload, unsigned int length) {
   broadcastState();
   Serial.println();
   Serial.println("-----------------------");
+}
+
+void getMac() {
+  for (int i = 0; i < 17; i++) {
+    dMac += WiFi.macAddress()[i];
+  }
 }
