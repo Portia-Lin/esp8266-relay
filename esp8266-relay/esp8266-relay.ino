@@ -1,3 +1,13 @@
+/*
+  Firmware for esp8266 based devices
+
+  YouTube:  Rodney McKay
+  https://www.youtube.com/channel/UCM1yyVNy0Wa4gOv0U6Ju6aw
+  
+  Github:   Portia-Lin
+  https://github.com/Portia-Lin/esp8266-relay
+*/
+
 #include "index.h"
 #include "config_device.h"
 #include "config_mqtt.h"
@@ -314,7 +324,7 @@ void eepromRead() {
     if (char(EEPROM.read(i)) != 0x00) {
       dHostname += char(EEPROM.read(i));
     }
-  }
+  } 
   Serial.println("EEPROM read");
 }
 
